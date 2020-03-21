@@ -1,50 +1,58 @@
-
-
- 
-void initGraphic() {
-    
-  display.begin();
-  display.setContrast(63); // 63 seems to work fine for my 5110 display
-  display.setRotation(2); // rotate 180 degrees, since that is the way the display is facing in my setup
-  //delay(2000);
-  // Clear the buffer.
-  display.clearDisplay();
-  display.display();
-  display.setTextSize(1);
-}
-
-void printHex(byte b) {
-  display.print("0x");
-  display.print(b, HEX);
-  display.print(",");
-  cx++;
-  if (cx > 3) {
-    cx = 0;
-    
-    display.println("");
-    cy++;
-    if (cy > 7) {
-      display.clearDisplay();
-      cy == 0;
-    }
-    display.setCursor(0, cy*8);
-  }
-  
-}
-
-/**
- * map to 128 * 64 pixel display
- * @param y in the range of 0-1024
- * @param x in the range of 0-4000;
- * 
+/*
+ * DISPLAY
+ * Functions for drawing info on the 5110 display
  */
-void dispCurve(uint16_t y, uint32_t x, uint16_t max) {
-  uint16_t h = height - 1;
-  uint16_t xp = (uint16_t) (x & 0xffff) * width / max;
-  uint16_t yp = (y * h) >> 10;
-  display.drawLine(opx, h - opy, xp, h - yp, BLACK);
-  opx = xp;
-  opy = yp;
+
+// initialize display
+// is called before starting the first interrupt
+void initDisplay() 
+{
+  display.begin();
+  display.setContrast(63); // 63 seems for my 5110 display
+  display.setRotation(2); // rotate 180 degrees, since that is the way the display is facing in my setup
+  display.setTextSize(1);
+  display.clearDisplay();
+  // TODO future: could add a splash "boot" screen here using delay
+  display.display();
+}
+
+
+// Used in scope function
+// y: current amplitude of audio (0-1024)
+// x: current x position
+void dispCurve(uint16_t y, uint32_t x) {
+  uint16_t h = DISP_HEIGHT - 1;
+  
+  uint16_t ym = map(y, 0, 1023, 0, 47);
+
+  /*
+  display.fillRect(x-1, 0, 2, DISP_HEIGHT, WHITE);
+  display.drawLine(x-1, scopeYprev, x, ym, BLACK);
+  */
+  display.drawLine(x, 0, x, DISP_HEIGHT, WHITE);
+  display.drawLine(x, scopeYprev, x, ym, BLACK);
+  
+  // set previous values for next line drawing
+  scopeYprev = ym;
+}
+
+void drawScope()
+{
+  dispCurve(vres, scopeX);
+  scopeX++;
+  
+  if (scopeX >= DISP_WIDTH) 
+  {
+    scopeX = 0;
+
+    scopeRefreshCounter++;
+    if (mil - scopeRefreshCounter >= scopeDelay) 
+    { 
+      scopeRefreshCounter = mil;
+      requestToUpdate = true;
+    }   
+     
+  }  
 }
 
 // set adsr values to display
@@ -252,28 +260,7 @@ void drawTBI(char* text) {
 
 
       case PAGE_SCOPE:
-        /**
-         * The dispaly refresh is not done every cycle...
-         */
-        refreh++;  
-        if (refreh > 200) { 
-          refreh = 0;
-          requestToUpdate = true;
-        } 
-        tbaseidx++;
-        if (tbaseidx > tbase) {
-          dispIdx++; // 
-          tbaseidx = 0;
-        }
-        dispCurve(vres, dispIdx, DisplayScale); // DisplayScale is what we scale the 128 hor. pixels to
-        /**
-         * if the end of the display is reached, clear the screen and start again
-        */
-        if (dispIdx > DisplayScale) {
-         display.clearDisplay();
-         dispIdx = 0;
-         opx = 0;
-        }
+        drawScope();
       break;
       
   }

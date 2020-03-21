@@ -73,9 +73,9 @@ byte sNo = 1;   // selected waveform
 
 const uint16_t MAXVOICE = 12;  
 
-const uint16_t ATTACKTIME = 2;  //  sec.
-const uint16_t RELEASETIME = 4; //  sec.
-const uint16_t DECAYTIME = 2;   //  sec.
+const uint16_t ATTACKTIME = 6;  //  sec.
+const uint16_t RELEASETIME = 6; //  sec.
+const uint16_t DECAYTIME = 6;   //  sec.
 
 
 /**
@@ -121,8 +121,15 @@ unsigned long VirtualTableIndexMax; // here the log-tables overflows
  * GRAPHICS variables
  */
 
+#define DISP_HEIGHT 48
+#define DISP_WIDTH  84
 
 // Vars for scope display:
+uint16_t scopeDelay = 87;  // delay in frames before sending framebuffer to display (87 seems pretty readable and still fast enough on 5110)
+uint16_t scopeYprev = 0;    // previous y value in scope
+uint32_t scopeRefreshCounter = 0;
+uint16_t scopeX = 0;        // current x position in scope
+
 int16_t vres = 0;
 uint16_t dispIdx = 0, refreh = 0, anz = 0;
 uint16_t tbase = 1; //
@@ -163,8 +170,6 @@ int WAVEDISP_WIDTH = width - 2*ARROW_WIDTH - 2 * DGAP;
 int xstart = ARROW_WIDTH + DGAP;
 
 
-uint16_t  opx = 0;
-uint16_t  opy = 0;
 uint16_t at, de, sus, rel; // adsr values
 int16_t fat, fde, pw; // filter ad values
 
@@ -264,39 +269,10 @@ int8_t rev[RevLength];  // cache (only 8 bit range)
 
 
 
-/**
- * Init ADSR default values to default values
- */
-void setAdsrVals() {
-  //Serial.println("Set ADSR values");
-    setDelayTime(4000); // 
-    revAmount = 4000;
-    setAttackScale(20);
-    setAtValue(20);
-    setDecayScale(600);
-    setDeValue(600);
-    setSustainValue(4095);
-    setSusValue(4095);
-    setReleaseScale(240);
-    setReValue(240);
-}
-
-
-
-//------------------------------------------------------------------------------------------
-
-
-
-
-
-
-
-//-------------------------------
-
  void handleAllNoteOff() {
    for (int n=0; n < MAXVOICE; n++) {
      if(voice[n].note > 0){
-         setGateOff(n); // change adsr state
+         setGateOff(n);
      }
    }
  }
@@ -311,7 +287,7 @@ void setAdsrVals() {
         return;
        }
        
-       setGateOff(slot); // change adsr state    
+       setGateOff(slot);
  }
 
 /**
@@ -363,10 +339,7 @@ void handleNoteOn(byte inChannel, byte inNote, byte inVelocity) {
           setFMFrequencys(f, slot, mil);
       voice[slot].note = inNote;
       setGateOn(slot); // start adsr, gate on setGateOn(channel); // start adsr, gate on
-      /*if (!doScope) {
-        dispNoteOn(inNote, slot);
-      }
-      */
+
 
 }
 
@@ -395,18 +368,13 @@ int16_t findOldestMidiNote(uint16_t note) {
 
   return slot; 
 }
-//----------------------------------------
 
-
-  //--------------
- 
- 
 
  /**
  * Here we create the actual sound
  * This method is called 40.000 time per second in the interrupt routine!
  */
-void ICACHE_RAM_ATTR doVoice() {
+void doVoice() {
     // Increment envelopes and oszillators
     for (uint16_t n = 0; n < MAXVOICE; n++) {
         if ( vAdsr[n].ADSR_mode != STOP && vAdsr[n].ADSR_mode != STOPPING) {
@@ -506,7 +474,7 @@ void ICACHE_RAM_ATTR doVoice() {
     
     //----------------- Synth Audio Mixer  --------------------
     if (anz > 0){
-      int32_t graphicSum = sum >> 2;
+      //int32_t graphicSum = sum >> 2;
       sum = sum >> 6;
       
      # if defined USE_CLIP_MIX   
@@ -537,8 +505,10 @@ void ICACHE_RAM_ATTR doVoice() {
       }
           
       // until here, all signals are +- values, so now add half amplitude to get positive values only:
-      vres = graphicSum + 512;
+      //vres = graphicSum + 512;
+      vres = (sum << 3) + 512;
       sum = pwmVolume2 + sum;
+      
     
       //pwmWrite(PWM_OUT, sum); // res
       ledcWrite(ledChannel, sum);
@@ -562,7 +532,7 @@ void ICACHE_RAM_ATTR doVoice() {
  * Interrupt routine, triggered every 20us (50Khz)
  * In this routine, we travel along the wavetable and output the amplitude values we find.
  */
- void ICACHE_RAM_ATTR handler_Synth() {
+ void handler_Synth() {
   //portENTER_CRITICAL_ISR(&timerMux);
 
   globalTic++;            // count up all the time at 50khz
@@ -603,31 +573,22 @@ void setup() {
   fm_decay = 1023;
 
   initVoices();
-  initGraphic();
-  setAdsrVals(); // some values to beginn with. Maybe read from EEprom ?
+  initDisplay();
+  initAdsrVals(); // some values to beginn with. Maybe read from EEprom ?
   initRev(); // inít reverb filter
+  selectWave(sNo);
+
+  
   requestToUpdate = true; // inital draw of the display
 
-  
-  //pinMode(ONBOARDLED, OUTPUT); // on - board led etc
-  //pinMode(scalePin, INPUT_ANALOG);
-  pinMode(PWM_OUT, OUTPUT);
 
-    delay(1000);
-    Serial.begin(115200); // serial for pc communication
+  delay(200);
+  Serial.begin(115200); // serial for pc communication
 
 
+  ledcSetup(ledChannel, pwmRate, resolution); // configure PWM output
+  ledcAttachPin(PWM_OUT, ledChannel);         // attach the channel PWM pin
 
-  // configure LED PWM functionalitites
-  ledcSetup(ledChannel, pwmRate, resolution);
-  
-  // attach the channel to the GPIO2 to be controlled
-  ledcAttachPin(PWM_OUT, ledChannel);
-
-
-  /** 
-   *  Setup Timer 2 to 25u (40000 per second)
-   */
 
   timer = timerBegin(0, 80, true);
   timerAttachInterrupt(timer, handler_Synth, true);
@@ -635,9 +596,6 @@ void setup() {
   timerAlarmEnable(timer);
 
   
-  selectWave(sNo);
-  setAdsrVals();
-  //digitalWrite(ONBOARDLED, 1); // turn LED off
   delay(200);
 
 }
@@ -647,13 +605,6 @@ void setup() {
 void loop() {
   readMIDI();
 
-
-   
-   updateDisplay();
-   
-
-
-  
   // -------- release notes in end of release state for re-use ------
   /**
    * If a voice is in finished release state mode (STOPPING), just clean it up here.
@@ -666,6 +617,13 @@ void loop() {
     vAdsr[n].ADSR_mode = STOP;
    }
   }
+  
+  updateDisplay();
+   
+
+
+  
+  
   
 
   

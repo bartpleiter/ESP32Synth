@@ -1,8 +1,20 @@
-/**
- * ADSR
- * TODO: remove the whole channel thing
- */
 
+/**
+ * Init ADSR default values to default values
+ */
+void initAdsrVals() {
+  //Serial.println("Set ADSR values");
+    setDelayTime(4000); // 
+    revAmount = 4000;
+    setAttackScale(20);
+    setAtValue(20);
+    setDecayScale(600);
+    setDeValue(600);
+    setSustainValue(4095);
+    setSusValue(4095);
+    setReleaseScale(240);
+    setReValue(240);
+}
 
 /**
  * change the state of the adsr

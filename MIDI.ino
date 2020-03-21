@@ -1,6 +1,4 @@
-//#include "stm32-WaveTableSynth_a.h"
-//#include "Graphic.h" 
-//#include "ADSR.h"
+
 
 //midi buffer vars:
 uint8_t mBuffer[3];
@@ -50,13 +48,16 @@ void executeMidi() {
           // select a new waveform!
           sNo = map(mBuffer[1], 0, 127, 0, WMAX-1);
           selectWave(sNo);
+          requestToUpdate = true;
         }
         else if (page == PAGE_PWM) {
           pw = map(mBuffer[1], 0, 127, 10, 1020);
           pwm_value = pw;
+          requestToUpdate = true;
         }
-
-        requestToUpdate = true;
+        else if (page == PAGE_SCOPE) {
+          scopeDelay = map(mBuffer[1], 0, 127, 0, 1000);
+        }
       }
       
       // volume slider
