@@ -19,12 +19,12 @@ void initADSR() {
     vAdsr[n].output = 0;
   }
   // Init ADSR Value sets
-  for (int n = 0; n < 2; n++) {
-    adsrValues[n].A_Step = 0;
-    adsrValues[n].D_Step = 0;
-    adsrValues[n].sustainVal = 0;
-    adsrValues[n].R_Step = 0;
-  }
+
+    adsrValues.A_Step = 0;
+    adsrValues.D_Step = 0;
+    adsrValues.sustainVal = 0;
+    adsrValues.R_Step = 0;
+    
    VirtualTableIndexMax = (LogLength << 10) - 1; 
 }
 
@@ -56,7 +56,7 @@ void setGateOff(int16_t channel) {
 uint16_t calculateScale(uint16_t scaleValue, uint16_t time) {
   unsigned long z = (LogLength * LogLength) / scaleValue; 
   z = z << 10; // *1024 to increase precision of table pointer calculation
-  unsigned long n = time * ISR_RATE;
+  unsigned long n = time * pwmRate;
   z /= n;
   return (uint16_t) z;
 }
@@ -72,13 +72,12 @@ uint16_t calculateScale(uint16_t scaleValue, uint16_t time) {
  * @param scaleValue the new attack value
  * @param channel voices or filter setting
  */
-void setAttackScale(uint16_t scaleValue, int16_t channel) {
-  //Serial.print("Attack value=");
-  //Serial.println(scaleValue);
+void setAttackScale(uint16_t scaleValue) {
+
   if (scaleValue <= 0)
     scaleValue = 10;
     
-  adsrValues[channel].A_Step = calculateScale(scaleValue, ATTACKTIME);
+  adsrValues.A_Step = calculateScale(scaleValue, ATTACKTIME);
 }
 
 /**
@@ -86,10 +85,10 @@ void setAttackScale(uint16_t scaleValue, int16_t channel) {
  * @param f the new deacy value
  * @param channel voices or filter setting
  */
-void setDecayScale(uint16_t scaleValue, int16_t channel) {
+void setDecayScale(uint16_t scaleValue) {
   if (scaleValue <= 0)
     scaleValue = 10;
-  adsrValues[channel].D_Step = calculateScale(scaleValue, DECAYTIME);
+  adsrValues.D_Step = calculateScale(scaleValue, DECAYTIME);
 }
 
 /**
@@ -97,10 +96,10 @@ void setDecayScale(uint16_t scaleValue, int16_t channel) {
  * @param f the new release value
  * @param channel voices or filter setting
  */
-void setReleaseScale(uint16_t scaleValue, int16_t channel) {
+void setReleaseScale(uint16_t scaleValue) {
   if (scaleValue <= 0)
     scaleValue = 10;
-  adsrValues[channel].R_Step = calculateScale(scaleValue, RELEASETIME);
+  adsrValues.R_Step = calculateScale(scaleValue, RELEASETIME);
 }
 
 /**
@@ -108,8 +107,8 @@ void setReleaseScale(uint16_t scaleValue, int16_t channel) {
  * @param f the new release
  * @param channel voices or filter setting
  */
-void setSustainValue(uint16_t f, int16_t channel) {
-  adsrValues[channel].sustainVal = f;
+void setSustainValue(uint16_t f) {
+  adsrValues.sustainVal = f;
 }
 
 uint16_t getTableIndex(int16_t channel) {
@@ -135,10 +134,10 @@ uint16_t getTableIndex(int16_t channel) {
  * make channel=filter only do AD, not SR
  * @return the new adsr output value
  */
-void addADSRStep(int n, int mde) {
+void addADSRStep(int n) {
   switch (vAdsr[n].ADSR_mode) {
     case ATTACK:
-        vAdsr[n].ATableIndex += adsrValues[mde].A_Step; 
+        vAdsr[n].ATableIndex += adsrValues.A_Step; 
         if ( vAdsr[n].ATableIndex >= VirtualTableIndexMax) {
           // end of attack
  
@@ -151,7 +150,7 @@ void addADSRStep(int n, int mde) {
         }
     break;
     case DECAY:
-        vAdsr[n].ATableIndex += adsrValues[mde].D_Step; 
+        vAdsr[n].ATableIndex += adsrValues.D_Step; 
         if ( vAdsr[n].ATableIndex >= VirtualTableIndexMax) {
           // end of Decay
           
@@ -165,7 +164,7 @@ void addADSRStep(int n, int mde) {
           vAdsr[n].output = getDecayVal(n);
           //Serial.print("Decay val=");
           //Serial.println( vAdsr[n].output);
-          if ( vAdsr[n].output <= adsrValues[mde].sustainVal) {
+          if ( vAdsr[n].output <= adsrValues.sustainVal) {
             
 
             // Serial.println(mil);
@@ -175,10 +174,10 @@ void addADSRStep(int n, int mde) {
         }
     break;
     case SUSTAIN:
-      vAdsr[n].output = adsrValues[mde].sustainVal;
+      vAdsr[n].output = adsrValues.sustainVal;
     break;
     case RELEASE:
-        vAdsr[n].ATableIndex += adsrValues[mde].R_Step; 
+        vAdsr[n].ATableIndex += adsrValues.R_Step; 
         if ( vAdsr[n].ATableIndex >= VirtualTableIndexMax) {
           // end of Release
           vAdsr[n].ATableIndex = 0;

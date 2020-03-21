@@ -46,23 +46,14 @@ void executeMidi() {
       // modulation wheel
       if ( mBuffer[0] == 0x01) {
 
-        if (page == WAVESEL) {
+        if (page == PAGE_WAVE) {
           // select a new waveform!
           sNo = map(mBuffer[1], 0, 127, 0, WMAX-1);
           selectWave(sNo);
         }
-        else if (page == DPWM) {
+        else if (page == PAGE_PWM) {
           pw = map(mBuffer[1], 0, 127, 10, 1020);
           pwm_value = pw;
-        }
-        else if (page == FMSTART) {
-            v_start = map(mBuffer[1], 0, 127, 10, 2047);
-        }
-        else if (page == FMEND) {
-            v_end = map(mBuffer[1], 0, 127, 10, 2047);
-        }
-        else if (page == FMDECAY) {
-            fm_decay = map(mBuffer[1], 0, 127, 10, 2047);
         }
 
         requestToUpdate = true;
@@ -75,9 +66,9 @@ void executeMidi() {
 
       // r1 slider
       else if ( mBuffer[0] == 0x4a) {
-        if (page == ADSRP)
+        if (page == PAGE_ADSR)
         {
-          setAttackScale(mBuffer[1] << 5, 0);
+          setAttackScale(mBuffer[1] << 5);
           setAtValue(mBuffer[1] << 5); // currently for graphics functions
           requestToUpdate = true;
         }
@@ -85,9 +76,9 @@ void executeMidi() {
 
       // r2 slider
       else if ( mBuffer[0] == 0x47) {
-        if (page == ADSRP)
+        if (page == PAGE_ADSR)
         {
-          setDecayScale(mBuffer[1] << 5, 0);
+          setDecayScale(mBuffer[1] << 5);
           setDeValue(mBuffer[1] << 5);
           requestToUpdate = true;
         }
@@ -95,9 +86,9 @@ void executeMidi() {
 
       // r3 slider
       else if ( mBuffer[0] == 0x49) {
-        if (page == ADSRP)
+        if (page == PAGE_ADSR)
         {
-          setSustainValue(mBuffer[1] << 5, 0);
+          setSustainValue(mBuffer[1] << 5);
           setSusValue(mBuffer[1] << 5);
           requestToUpdate = true;
         }
@@ -105,9 +96,9 @@ void executeMidi() {
 
       // r4 slider
       else if ( mBuffer[0] == 0x48) {
-        if (page == ADSRP)
+        if (page == PAGE_ADSR)
         {
-          setReleaseScale(mBuffer[1] << 5, 0);
+          setReleaseScale(mBuffer[1] << 5);
           setReValue(mBuffer[1] << 5);
           requestToUpdate = true;
         }
@@ -121,7 +112,7 @@ void executeMidi() {
       if (mBuffer[1] == 127)
       {
         page++;
-        if (page > PAGEMAX)
+        if (page >= PAGES)
           page = 0;
 
         requestToUpdate = true;
@@ -129,7 +120,7 @@ void executeMidi() {
       else if (mBuffer[1] == 0)
       {
         if (page == 0)
-          page = PAGEMAX;
+          page = PAGES-1;
         else
           page--;
 
