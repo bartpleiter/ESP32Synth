@@ -2,21 +2,17 @@
  * STM32duino synth
  * 
  * CLEANUP TODO:
- * remove all channels. keep it simple. will only need one channel anyways (my usb keyboard)
- * rename niksMidi to midi
  * fix the atan clipping mehtod
  * remove all unnessecairy features
- * place global variables where they belong
  * make unneeded global variables local
  * rename variables and functions
  * remove external adsr thingy and input?
  * graphics adsr functions should get variables from global adsr vars
  * replace voice with same note if possible to improve polyphony
- * make seperate file with global variables
- * improve adsr graph horizontal position and such. also drawing speed
  * fix pwm (square wave) second half
  * increase max decay and release length
  * use proper data types (int uint32_t uint8_t etc.)
+ * improve adsr value calculation
  */
 
 #include <SPI.h>
@@ -44,9 +40,6 @@
 // MIDI input is on serial port 0 (RX)
 
 
-//--------- Sytnthesizer (debug) parameters ---------------
-const bool doReverbF = false;      // use reverb filter, still need to properly test
-
 
 //--------- Interrupt & PWM parameters ---------------
 const int pwmRate = 50000;    // pwm frequency and is used to traverse wave tables 
@@ -67,15 +60,17 @@ portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
 // 0=saw, 1=sin,2=tri, 3=sqr, 4=FM
 byte sNo = 1;   // selected waveform
 
+uint16_t pwmWidth = 1023; // width of square wave (0-2047)
+
 /*
  * ADSR variables
  */
 
-const uint16_t MAXVOICE = 12;  
+const uint16_t MAXVOICE = 12;  // amount of polyphony
 
-const uint16_t ATTACKTIME = 6;  //  sec.
-const uint16_t RELEASETIME = 6; //  sec.
-const uint16_t DECAYTIME = 6;   //  sec.
+const uint16_t ATTACKTIME = 3;  //  ~sec.
+const uint16_t RELEASETIME = 6; //  ~sec.
+const uint16_t DECAYTIME = 8;   //  ~sec.
 
 
 /**
@@ -124,23 +119,29 @@ unsigned long VirtualTableIndexMax; // here the log-tables overflows
 #define DISP_HEIGHT 48
 #define DISP_WIDTH  84
 
-// Vars for scope display:
-uint16_t scopeDelay = 87;  // delay in frames before sending framebuffer to display (87 seems pretty readable and still fast enough on 5110)
-uint16_t scopeYprev = 0;    // previous y value in scope
-uint32_t scopeRefreshCounter = 0;
-uint16_t scopeX = 0;        // current x position in scope
 
-int16_t vres = 0;
-uint16_t dispIdx = 0, refreh = 0, anz = 0;
-uint16_t tbase = 1; //
-uint16_t tbaseidx = 0;
-uint16_t DisplayScale = 6000;
+bool requestToUpdate = true; // true if we want to send the framebuffer to the display
+
+//clk, din, dc, cs, rst
+Adafruit_PCD8544 display(0, 4, 2, 15, 13); // using software SPI
+
+
+// Vars for scope display:
+uint16_t scopeDelay = 87;         // delay in frames before sending framebuffer to display (87 seems pretty readable and still fast enough on 5110)
+uint16_t scopeYprev = 0;          // previous y value in scope
+uint32_t scopeRefreshCounter = 0; // previous millis time of last sent frame
+uint16_t scopeX = 0;              // current x position in scope
+
+
+uint16_t currentlyPlayingVoices = 0;
+uint32_t vres = 0;
 
 int waveFormD[128];   // waveform data for display
- 
-const int width =  84; // pixel-width of display
-const int height = 48; // pixel height of display
-const int LF = 4;     // line feed size
+
+
+
+#define DISP_ADSR_HEIGHT_OFFSET 8
+uint16_t dispAttack, dispDecay, dispSustain, dispRelease; // ADSR values for display
 
 
 #define PAGES       8
@@ -154,31 +155,6 @@ const int LF = 4;     // line feed size
 #define PAGE_SCOPE  7
 
 uint16_t  page = PAGE_WAVE;    // the current menu page
-
-
-const int chDispY = LF;
-const int noOnY = LF*2;   // note on-off y pos
-const int chDispX = 0;   // midi Channel
-const int ntOnX = 42;   // note on x pos
-const int ntOffX = 85;   // note off x pos
-const int curveOffX = 42;
-const int ntW = 42; // width of fields
-
-const int ARROW_WIDTH = 8;
-const int DGAP = 3;
-int WAVEDISP_WIDTH = width - 2*ARROW_WIDTH - 2 * DGAP;
-int xstart = ARROW_WIDTH + DGAP;
-
-
-uint16_t at, de, sus, rel; // adsr values
-int16_t fat, fde, pw; // filter ad values
-
-bool requestToUpdate = true; // if true, execute the  display.display() function
-int cx = 0, cy = 0;
-
-//clk, din, dc, cs, rst
-Adafruit_PCD8544 display(0, 4, 2, 15, 13); // using software SPI
-
 
 
 /*
@@ -199,10 +175,13 @@ const int precisionShift = 12;
 const int TL = 11; // table length
 
 // FM vars
-int fm_modulator = 256; // 
-int v_start = 384;      // to eeprom!
-int v_end = 256;
-int fm_decay = 1024;
+int fm_modulator = 256; // 2048
+int v_start = 384;  //2048
+int v_end = 256;    //2048
+int fm_decay = 1024;  //2048
+
+
+
 uint16_t fm_tableLength = SinusLengthInt; //2048;
 int fm_volume = SinusLengthInt - 1; // +- 2047
 uint64_t fm_mask = pow(2, TL+precisionShift) - 1;
@@ -213,8 +192,7 @@ int16_t ScaleV =  pow(2, scale);
 uint64_t range = fm_tableLength << precisionShift;
 
 
-// reverb
-int revAmount = 4000;
+
 /**
  * Note: the voice-index is the same as the adsr index! (a slot)
  */
@@ -242,29 +220,6 @@ Voice_type voice[MAXVOICE];
 uint16_t waveForm;              // which wavetable to play (saw, sin etc.)
 uint32_t mTableIndexMax; // here the table overflows
 uint32_t tableLength; // length of this wavetable
-
-// global vars 
-int16_t pwm_value = 512;           // 0-1024 (poti value);
-int16_t pwm_CValue = 512;           // 0-1024 cv value for pwm;
-
-
-/*
- * Reverb variables
- */
-
-// reverb filter, using 10kByte Ram = 250ms@40k ISR Rate 
-const uint16_t RevLength = 10000;
-uint16_t maxR = RevLength -1;
-
-uint16_t delayTime = 0;// how many entrys behind head we read the cache
-int16_t writePointer;  // where to write
-int16_t readPointer;   // where to read
-int16_t diff = 0;      // is positive, when a longer delay time is set. This prevents n on-sensical data to be read.
-bool changes = false;
-
-// Analog buffer
-int8_t rev[RevLength];  // cache (only 8 bit range)
-
 
 
 
@@ -422,12 +377,8 @@ void doVoice() {
              c = getSinInt(tIdx);  
            else if(waveForm == 2)
              c = getTriInt(tIdx); 
-           else if(waveForm == 3) {// square, use pwm value!
-              int pv = pwm_CValue + pwm_value; 
-              if (pv > 1020)
-                pv = 1020;
-              c = (tIdx < pv)?-2047:2047; 
-           }
+           else if(waveForm == 3)
+            c = (tIdx < pwmWidth)?-2047:2047; 
            voice[n].vOutput = c; //  +- 2047
           }
           addADSRStep(n);     // 0-4096  all adsr ???
@@ -437,7 +388,7 @@ void doVoice() {
       
     //-------------- Audio Mixer -----------------
     int32_t sum = 0;      
-    anz = 0;
+    currentlyPlayingVoices = 0;
     for (int16_t n = 0; n < MAXVOICE; n++) {
      if (vAdsr[n].ADSR_mode != STOP) {
          // just examine active voices
@@ -450,32 +401,16 @@ void doVoice() {
          
         //Serial.print(" added sum=");
         //Serial.print(sum);
-         anz++;   
+         currentlyPlayingVoices++;   
       } 
     }
-    
-    //----------  Reverb Filter: recover values from the rev-buffer
-    if (doReverbF && delayTime > 0 && !changes && diff == 0) {
-      // blow up to original volume (*2)
-      int8_t reverb = readRev() << 2; // echo value [+-127], since the echo buffer is only 8bit
-      // reduce rev amplitude, by using the mixer value [0-4095]
-      int32_t rv = (reverb * revAmount) >> 12; // : 4096; reduce echo amplitude by mixer value 4096=2^12, 
-      if (rv != 0) { // if we have a pending echo
-        
-        // test echo value with scope:
-       //pwmWrite(PWM_OUT, pwmVolume2+rv); // test output to 2nd analog out, just the reverb signal...
-        //---
-        sum += rv; // add to actual value, treat like another voice that got active
-        anz++ ;
-      }
-    }
-    
+       
 
     
     //----------------- Synth Audio Mixer  --------------------
-    if (anz > 0){
-      //int32_t graphicSum = sum >> 2;
-      sum = sum >> 6;
+    if (currentlyPlayingVoices > 0)
+    {
+      sum = sum >> 6; // divide to adjust range to PWM output
       
      # if defined USE_CLIP_MIX   
       if (sum > pwmVolume2)
@@ -483,8 +418,6 @@ void doVoice() {
       if (sum < -pwmVolume2)
         sum = -pwmVolume2;
      #endif  
-      //Serial.print(" clipped sum=");
-      //Serial.print(sum);
      /* //--- 3. use Atan to do the cliping ---------
       # if defined USE_ATAN_MIX   
         uint16_t tv = 0; 
@@ -497,12 +430,7 @@ void doVoice() {
         res = tv;
       #endif
       */
-      //--- feed the delay buffer ----
-      if (doReverbF && !changes) {
-          int8_t rv = (int8_t) ((sum * 255) / pwmVolume2);
-          writeHead(rv); //scale to 8bit, since our memory buffer only has 8 bit resolution
-         // pwmWrite(PWM_OUT, pwmVolume2+rv);
-      }
+      
           
       // until here, all signals are +- values, so now add half amplitude to get positive values only:
       //vres = graphicSum + 512;
@@ -516,15 +444,23 @@ void doVoice() {
       //digitalWrite(PC13, 0); // turn on, voice is active
     }
     else {
-      // No voice active, feed the delay buffer with empty values
-      if (doReverbF)
-        writeHead(0);
-      //
-      //pwmWrite(PWM_OUT, pwmVolume2); 
+
       ledcWrite(ledChannel, pwmVolume2);
       vres = 512;
-      //digitalWrite(PC13, 1);
     }
+
+      // -------- release notes in end of release state for re-use ------
+  /**
+   * If a voice is in finished release state mode (STOPPING), just clean it up here.
+   */
+  for (int n=0; n < MAXVOICE; n++) {
+   if (vAdsr[n].ADSR_mode == STOPPING) {
+    int nt = voice[n].note;
+    voice[n].note = 0;
+    vAdsr[n].ADSR_mode = STOP;
+   }
+  }
+  
   }
 
 
@@ -538,9 +474,11 @@ void doVoice() {
   globalTic++;            // count up all the time at 50khz
   if (globalTic >= 40) {
     globalTic = 0;        // 40 tics at 50 khz is less than one millisec.
-    mil++;                // increase millisecond tic, used for button debounce etc.
+    mil++;                // increase millisecond tic
   }
   doVoice();              // the actual sound generation
+
+
   
   //portEXIT_CRITICAL_ISR(&timerMux);
  }
@@ -553,18 +491,9 @@ void doVoice() {
 
 
 
-/**
- * Setup routine, this is the first to be called on startup of the stm32
- */
 void setup() {
-  // 1st Initialize the programm
   sNo = 3; 
 
-  fat =  256;
-  fde =  512;
-
-  pwm_value = 512;
-  pw = pwm_value;
 
   v_start =  256;
 
@@ -575,7 +504,6 @@ void setup() {
   initVoices();
   initDisplay();
   initAdsrVals(); // some values to beginn with. Maybe read from EEprom ?
-  initRev(); // inít reverb filter
   selectWave(sNo);
 
   
@@ -605,18 +533,7 @@ void setup() {
 void loop() {
   readMIDI();
 
-  // -------- release notes in end of release state for re-use ------
-  /**
-   * If a voice is in finished release state mode (STOPPING), just clean it up here.
-   * If we would do this in the interrupt routine, unexpected things might happen! :-)
-   */
-  for (int n=0; n < MAXVOICE; n++) {
-   if (vAdsr[n].ADSR_mode == STOPPING) {
-    int nt = voice[n].note;
-    voice[n].note = 0;
-    vAdsr[n].ADSR_mode = STOP;
-   }
-  }
+
   
   updateDisplay();
    

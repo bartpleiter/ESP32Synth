@@ -51,8 +51,7 @@ void executeMidi() {
           requestToUpdate = true;
         }
         else if (page == PAGE_PWM) {
-          pw = map(mBuffer[1], 0, 127, 10, 1020);
-          pwm_value = pw;
+          pwmWidth = map(mBuffer[1], 0, 127, 0, 2047);
           requestToUpdate = true;
         }
         else if (page == PAGE_SCOPE) {
@@ -62,7 +61,7 @@ void executeMidi() {
       
       // volume slider
       else if ( mBuffer[0] == 0x07) {
-        
+        pwmWidth = map(mBuffer[1], 0, 127, 0, 2047);
       }
 
       // r1 slider
@@ -70,7 +69,12 @@ void executeMidi() {
         if (page == PAGE_ADSR)
         {
           setAttackScale(mBuffer[1] << 5);
-          setAtValue(mBuffer[1] << 5); // currently for graphics functions
+          DisplaySetAtValue(mBuffer[1] << 5); // currently for graphics functions
+          requestToUpdate = true;
+        }
+        else if (page == PAGE_FM)
+        {
+          fm_modulator = mBuffer[1] << 2;
           requestToUpdate = true;
         }
       }
@@ -80,7 +84,12 @@ void executeMidi() {
         if (page == PAGE_ADSR)
         {
           setDecayScale(mBuffer[1] << 5);
-          setDeValue(mBuffer[1] << 5);
+          DisplaySetDeValue(mBuffer[1] << 5);
+          requestToUpdate = true;
+        }
+        else if (page == PAGE_FM)
+        {
+          v_start = map(mBuffer[1], 0, 127, 0, 2047);
           requestToUpdate = true;
         }
       }
@@ -90,7 +99,12 @@ void executeMidi() {
         if (page == PAGE_ADSR)
         {
           setSustainValue(mBuffer[1] << 5);
-          setSusValue(mBuffer[1] << 5);
+          DisplaySetSusValue(mBuffer[1] << 5);
+          requestToUpdate = true;
+        }
+        else if (page == PAGE_FM)
+        {
+          v_end = map(mBuffer[1], 0, 127, 0, 2047);
           requestToUpdate = true;
         }
       }
@@ -100,7 +114,12 @@ void executeMidi() {
         if (page == PAGE_ADSR)
         {
           setReleaseScale(mBuffer[1] << 5);
-          setReValue(mBuffer[1] << 5);
+          DisplaySetReValue(mBuffer[1] << 5);
+          requestToUpdate = true;
+        }
+        else if (page == PAGE_FM)
+        {
+          fm_decay = map(mBuffer[1], 0, 127, 0, 2047);
           requestToUpdate = true;
         }
       }

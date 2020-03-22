@@ -17,119 +17,91 @@ void initDisplay()
 }
 
 
-// Used in scope function
-// y: current amplitude of audio (0-1024)
+// Draw next vertical line in audio scope
+// y: current amplitude of audio
 // x: current x position
-void dispCurve(uint16_t y, uint32_t x) {
+void dispCurve(uint16_t y, uint16_t x) 
+{
   uint16_t h = DISP_HEIGHT - 1;
-  
   uint16_t ym = map(y, 0, 1023, 0, 47);
-
-  /*
-  display.fillRect(x-1, 0, 2, DISP_HEIGHT, WHITE);
-  display.drawLine(x-1, scopeYprev, x, ym, BLACK);
-  */
-  display.drawLine(x, 0, x, DISP_HEIGHT, WHITE);
+  display.drawLine(x, 0, x, DISP_HEIGHT-1, WHITE);
   display.drawLine(x, scopeYprev, x, ym, BLACK);
   
   // set previous values for next line drawing
   scopeYprev = ym;
 }
 
+// Draws and displays audio scope
+// Should be called in main loop
 void drawScope()
 {
   dispCurve(vres, scopeX);
   scopeX++;
-  
   if (scopeX >= DISP_WIDTH) 
   {
     scopeX = 0;
-
     scopeRefreshCounter++;
     if (mil - scopeRefreshCounter >= scopeDelay) 
     { 
       scopeRefreshCounter = mil;
       requestToUpdate = true;
     }   
-     
   }  
 }
 
-// set adsr values to display
-void setAtValue(uint16_t a) {
-  at = a;
+// Set ADSR display values
+// inputs values range from 0 to 4095
+void DisplaySetAtValue(uint16_t val) {
+  dispAttack = map(val, 0, 4095, 0, 36);
 }
-void setDeValue(uint16_t a) {
-  de = a;
+void DisplaySetDeValue(uint16_t val) {
+  dispDecay = map(val, 0, 4095, 0, 20);
 }
-void setSusValue(uint16_t a) {
-  sus = a;
+void DisplaySetSusValue(uint16_t val) {
+  dispSustain = map(val, 0, 4095, 0, 40);;
 }
-void setReValue(uint16_t a) {
-  rel = a;
+void DisplaySetReValue(uint16_t val) {
+  dispRelease = map(val, 0, 4095, 0, 20);
 }
-
-
 
 void drawADSR() {
- 
     display.clearDisplay();
-    uint16_t y = height -1;
-    uint16_t x = 0;
-    uint32_t s = sus * 64 / 4096; // convert to pixel
 
-    //display.setTextSize(2);
-    //display.setCursor(80, 0);
-    //display.println("ADSR"); 
-    /*Serial.print("at=");
-    Serial.println(at);
-    */
+    display.setCursor(32, 0);
+    display.println("ADSR"); 
+
     // Attack
-    uint32_t a = at * 32 / 4096; // after what pixel we are at 100%
-   // Serial.println(a);
-    display.drawLine(x, height, a, 0, BLACK);
-    display.drawLine(a, 0, 32, 0, BLACK);
-    // Decay & sustain
-    x = 32;
-    a = de * 32 / 4096; // 
-    y = height - s -1;
-    display.drawLine(x, 0, x+a, y, BLACK);
-    display.drawLine(x+a, y, x+64, y, BLACK);
-    x = 96;
-    // release
-    a = rel * 32 / 4096; //
-    display.drawLine(x, y, x+a, height-1, BLACK);
-    display.drawLine(x+a, height-1, 128, height-1, BLACK);
+    display.drawLine(0, DISP_HEIGHT-1, dispAttack, DISP_ADSR_HEIGHT_OFFSET, BLACK);
     
+    // Decay
+    display.drawLine(dispAttack, DISP_ADSR_HEIGHT_OFFSET, dispAttack + dispDecay, DISP_ADSR_HEIGHT_OFFSET + (40 - dispSustain) -1, BLACK);
+
+    // Sustain
+    display.drawLine(dispAttack + dispDecay, DISP_ADSR_HEIGHT_OFFSET + (40 - dispSustain) -1, 
+                      dispAttack + dispDecay + 20, DISP_ADSR_HEIGHT_OFFSET + (40 - dispSustain) - 1, BLACK);
+
+    // Relea
+    display.drawLine(dispAttack + dispDecay + 20, DISP_ADSR_HEIGHT_OFFSET + (40 - dispSustain) -1, 
+                      dispAttack + dispDecay + 20 + dispRelease, DISP_HEIGHT-1 , BLACK);
 }
 
 
 void drawPWM() {
+  //todo pwmWidth use
     display.clearDisplay();
-    uint16_t y = height -1;
-    uint16_t x = 0;
-    uint16_t h = 20;
-    display.setTextSize(1);
-    display.setCursor(40, 0);
+
+    display.setCursor(34, 0);
     display.println("PWM"); 
-    uint16_t a = pw * 127 / 1023; // // table length
-    display.drawLine(x, y, x, h, BLACK);
-    display.drawLine(x, h, a, h, BLACK);
-    display.drawLine(a, h, a, y, BLACK); 
-    display.drawLine(a, y, 127, y, BLACK);
+    
+    int mappedPwmWidth = 83 - map(pwmWidth, 0, 2047, 0, 83);
+    
+    display.drawLine(0, DISP_HEIGHT-1, mappedPwmWidth, DISP_HEIGHT-1, BLACK);
+    display.drawLine(mappedPwmWidth, DISP_HEIGHT-1, mappedPwmWidth, 12, BLACK);
+    display.drawLine(mappedPwmWidth, 12, DISP_WIDTH-1, 12, BLACK); 
+
       
 }
-void dispFM() {
-  display.clearDisplay();
-  int y = noOnY+LF;
-  display.setCursor(ntOnX,y);
-  // clear old text
-  display.fillRect(ntOnX, y, ntW, LF, 0);
-  //display.display();
-  display.print("FM");
-  //display.println(nt);
-  //display.display();
-}
+
 
 
 
@@ -137,22 +109,22 @@ void dispFM() {
  * Scale the table to the oled display with 128 x 64 pixel
  */
 void getSawWave() {
-  for (int n=0; n < WAVEDISP_WIDTH; n++) {
-    uint16_t idx = (n * SawLengthInt) / WAVEDISP_WIDTH;
-    waveFormD[n] = 31+ (getSawInt(idx) >> 6); // table = 0-255; display = 0-63
+  for (int n=0; n < DISP_WIDTH; n++) {
+    uint16_t idx = (n * SawLengthInt) / DISP_WIDTH;
+    waveFormD[n] = (DISP_HEIGHT/2) + (getSawInt(idx) >> 7) - 6;
   }
 }
 
 void getSinWave() {
-  for (int n=0; n < WAVEDISP_WIDTH; n++) {
-    uint16_t idx = (n * SinusLengthInt) / WAVEDISP_WIDTH;
-    waveFormD[n] = 31+ (getSinInt(idx) >> 6); // table = 0-255; display = 0-63
+  for (int n=0; n < DISP_WIDTH; n++) {
+    uint16_t idx = (n * SinusLengthInt) / DISP_WIDTH;
+    waveFormD[n] = (DISP_HEIGHT/2) + (getSinInt(idx) >> 7) - 6;
   }
 }
 void getTriWave() {
-  for (int n=0; n < WAVEDISP_WIDTH; n++) {
-    uint16_t idx = (n * TriLengthInt) / WAVEDISP_WIDTH;
-    waveFormD[n] = 31+ (getTriInt(idx) >> 6); // table = 0-255; display = 0-63
+  for (int n=0; n < DISP_WIDTH; n++) {
+    uint16_t idx = (n * TriLengthInt) / DISP_WIDTH;
+    waveFormD[n] = (DISP_HEIGHT/2) + (getTriInt(idx) >> 7) - 6;
   }
 }
 /*void getSQRWave() {
@@ -166,31 +138,30 @@ void getTriWave() {
 */
 void drawWaveForm(int w) {
   display.clearDisplay();
-  int h = height -1;
+
+  display.setCursor(32, 0);
+  display.println("Wave"); 
+  
+
   if (w == SQR) {
-    //Serial.print("pwm_value="); 
-    //Serial.print(pwm_value);
-    
-    uint32_t pwmx = pwm_value * WAVEDISP_WIDTH;
-    //Serial.print(" z=");
-    //Serial.print(pwmx);
-    pwmx = xstart + (pwmx >> 10); // : 1024 (0-1024 is the range for the pwm) 
-    //Serial.print(" pwmx=");
-    //Serial.println(pwmx);
-    
-    display.drawLine(xstart, 0, pwmx, 0, BLACK);
-    display.drawLine(pwmx, 0, pwmx, h, BLACK);
-    display.drawLine(pwmx, h, xstart + WAVEDISP_WIDTH, h, BLACK);
+    display.drawLine(0,             12,                DISP_WIDTH/2, 12,            BLACK);
+    display.drawLine(DISP_WIDTH/2,  12,                DISP_WIDTH/2, DISP_HEIGHT-1, BLACK);
+    display.drawLine(DISP_WIDTH/2,  DISP_HEIGHT-1    , DISP_WIDTH,   DISP_HEIGHT-1, BLACK);
   }
   else if (w == FM) {
-    dispFM();
+    display.setTextSize(2);
+    display.setCursor(32, 20);
+    display.println("FM"); 
+    display.setTextSize(1);
   }
   else {
-    for (int n = 0; n < WAVEDISP_WIDTH; n++)
-      display.drawPixel(xstart+n, h - waveFormD[n], BLACK);
+    for (int n = 0; n < DISP_WIDTH; n++)
+      display.drawPixel(n, DISP_HEIGHT - waveFormD[n], BLACK);
   }
 }
 
+
+// placeholder for to be implemented functions
 void drawTBI(char* text) {
   display.clearDisplay();
   display.setTextSize(1);
@@ -200,6 +171,37 @@ void drawTBI(char* text) {
   display.println(text); 
 }
 
+void drawFM()
+{
+  display.clearDisplay();
+
+  display.setCursor(36, 0);
+  display.println("FM"); 
+
+  display.setCursor(0, 14);
+  display.println("MOD"); 
+  display.setCursor(60, 14);
+  display.println(fm_modulator); 
+
+
+  display.setCursor(0, 22);
+  display.println("START"); 
+  display.setCursor(60, 22);
+  display.println(v_start); 
+  
+
+  display.setCursor(0, 30);
+  display.println("END"); 
+  display.setCursor(60, 30);
+  display.println(v_end); 
+  
+
+  display.setCursor(0, 38);
+  display.println("DECAY"); 
+  display.setCursor(60, 38);
+  display.println(fm_decay); 
+  
+}
 
 
 /**
@@ -210,18 +212,14 @@ void drawTBI(char* text) {
     case PAGE_WAVE:
       if (requestToUpdate) 
       {
-          if (sNo == SAW)
-           getSawWave(); // set the waveForm array
-          else if (sNo == SIN) 
-           getSinWave();
-          else if (sNo == TRI) 
-           getTriWave();
-          /*else if (sNo == SQR) 
-           getSQRWave();
-           */
-          drawWaveForm(sNo);
-          
-        }
+        if (sNo == SAW)
+          getSawWave();
+        else if (sNo == SIN) 
+          getSinWave();
+        else if (sNo == TRI) 
+          getTriWave();
+        drawWaveForm(sNo);
+      }
       break;
       
     case PAGE_ADSR:
@@ -234,7 +232,7 @@ void drawTBI(char* text) {
       
       case PAGE_FM:
           if (requestToUpdate)
-            drawTBI("FM");
+            drawFM();
           break;  
 
       case PAGE_LFO:

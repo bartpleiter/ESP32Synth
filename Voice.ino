@@ -136,12 +136,8 @@ void addStep(int n) {
      c = getSinInt(tIdx);  
    else if(waveForm == 2)
      c = getTriInt(tIdx); 
-   else if(waveForm == 3) {// square, use pwm value!
-     int pv = pwm_CValue + pwm_value; 
-     if (pv > 1020)
-       pv = 1020;
-     c = (tIdx < pv)?-2047:2047; 
-   }
+   else if(waveForm == 3)
+    c = (tIdx < pwmWidth)?-2047:2047; 
    voice[n].vOutput = c; //  +- 2047
 }
 
