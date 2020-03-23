@@ -6,11 +6,7 @@
  * remove all unnessecairy features
  * make unneeded global variables local
  * rename variables and functions
- * remove external adsr thingy and input?
- * graphics adsr functions should get variables from global adsr vars
  * replace voice with same note if possible to improve polyphony
- * fix pwm (square wave) second half
- * increase max decay and release length
  * use proper data types (int uint32_t uint8_t etc.)
  * improve adsr value calculation
  */
@@ -42,10 +38,10 @@
 
 
 //--------- Interrupt & PWM parameters ---------------
-const int pwmRate = 50000;    // pwm frequency and is used to traverse wave tables 
-const int isrms = 20;         // uS delay between calling handleSynth interrupt (50KHz)
-const int ledChannel = 0;     // channel for ESP32 PWM
-const int resolution = 10;    // ESP32 PWM resolution
+#define PWMRATE     50000    // pwm frequency and is used to traverse wave tables 
+#define ISRMS       20      // uS delay between calling handleSynth interrupt (50KHz)
+#define PWMCHANNEL  0     // channel for ESP32 PWM
+#define PWMRESOLUTION  10    // ESP32 PWM PWMRESOLUTION
 
 //TODO investigate why timing works by counting to 40 at 50KHz
 uint32_t mil = 0;               // millisec. Replace millis() and is calculated during interrupt
@@ -58,36 +54,37 @@ portMUX_TYPE timerMux = portMUX_INITIALIZER_UNLOCKED;
 
 //------------ Vars --------------
 // 0=saw, 1=sin,2=tri, 3=sqr, 4=FM
-byte sNo = 1;   // selected waveform
-
-uint16_t pwmWidth = 1023; // width of square wave (0-2047)
+uint32_t sNo = 1;   // selected waveform
+uint32_t pwmWidth = 1023; // width of square wave (0-2047)
 
 /*
  * ADSR variables
  */
 
-const uint16_t MAXVOICE = 12;  // amount of polyphony
+#define MAXVOICE      12  // amount of polyphony
 
-const uint16_t ATTACKTIME = 3;  //  ~sec.
-const uint16_t RELEASETIME = 6; //  ~sec.
-const uint16_t DECAYTIME = 8;   //  ~sec.
+// Max ADR time in ~seconds
+#define ATTACKTIME    3
+#define RELEASETIME   6
+#define DECAYTIME     8
 
 
 /**
  * ADSR state codes
  */
-const uint16_t ATTACK = 1;
-const uint16_t DECAY = 2;
-const uint16_t SUSTAIN = 3;
-const uint16_t RELEASE = 4;
-const uint16_t STOP = 0;
-const uint16_t STOPPING = 100; 
+#define ATTACK    1
+#define DECAY     2
+#define SUSTAIN   3
+#define RELEASE   4
+#define STOP      0
+#define STOPPING  100
+
 
 typedef struct {
-  uint16_t A_Step;      // attack step 
-  uint16_t D_Step;      // decay step
-  uint16_t sustainVal;  // sustain value
-  uint16_t R_Step;      // release step
+  uint32_t A_Step;      // attack step 
+  uint32_t D_Step;      // decay step
+  uint32_t sustainVal;  // sustain value
+  uint32_t R_Step;      // release step
  } ADSR_type;
 
 
@@ -100,14 +97,14 @@ ADSR_type adsrValues;
 typedef struct {
   unsigned long ATableIndex;
   uint32_t ADSR_mode;
-  uint16_t output;
-  uint16_t lastVal; // the last value, when note off came
+  uint32_t output;
+  uint32_t lastVal; // the last value, when note off came
 } ADSR_OfVoice_type;
 
-uint16_t filter = MAXVOICE;
+
 ADSR_OfVoice_type vAdsr[MAXVOICE+1]; // MAXVOICE is the filter adsr index (last in the array)
 
-unsigned long VirtualTableIndexMax; // here the log-tables overflows
+uint32_t VirtualTableIndexMax; // here the log-tables overflows
 
 
 
@@ -127,21 +124,21 @@ Adafruit_PCD8544 display(0, 4, 2, 15, 13); // using software SPI
 
 
 // Vars for scope display:
-uint16_t scopeDelay = 87;         // delay in frames before sending framebuffer to display (87 seems pretty readable and still fast enough on 5110)
-uint16_t scopeYprev = 0;          // previous y value in scope
+uint32_t scopeDelay = 87;         // delay in frames before sending framebuffer to display (87 seems pretty readable and still fast enough on 5110)
+uint32_t scopeYprev = 0;          // previous y value in scope
 uint32_t scopeRefreshCounter = 0; // previous millis time of last sent frame
-uint16_t scopeX = 0;              // current x position in scope
+uint32_t scopeX = 0;              // current x position in scope
 
 
-uint16_t currentlyPlayingVoices = 0;
+uint32_t currentlyPlayingVoices = 0;
 uint32_t vres = 0;
 
-int waveFormD[128];   // waveform data for display
+int32_t waveFormD[128];   // waveform data for display
 
 
 
 #define DISP_ADSR_HEIGHT_OFFSET 8
-uint16_t dispAttack, dispDecay, dispSustain, dispRelease; // ADSR values for display
+uint32_t dispAttack, dispDecay, dispSustain, dispRelease; // ADSR values for display
 
 
 #define PAGES       8
@@ -154,41 +151,43 @@ uint16_t dispAttack, dispDecay, dispSustain, dispRelease; // ADSR values for dis
 #define PAGE_PASS   6
 #define PAGE_SCOPE  7
 
-uint16_t  page = PAGE_WAVE;    // the current menu page
+uint32_t  page = PAGE_WAVE;    // the current menu page
 
 
 /*
  * VOICE variables
  */
 
-const int SAW = 0;
-const int SIN = 1;
-const int TRI = 2;
-const int SQR = 3;
-const int FM = 4;
-const int WMAX = 5;
+#define SAW  0
+#define SIN  1
+#define TRI  2
+#define SQR  3
+#define FM  4
+#define WMAX  5
 
-const int pwmVolume = 1024;
-int pwmVolume2 = pwmVolume / 2;
+#define pwmVolume 1024
+#define pwmVolume2 512
 
-const int precisionShift = 12;
-const int TL = 11; // table length
+#define precisionShift 12
+#define TL 11 // table length
 
 // FM vars
-int fm_modulator = 256; // 2048
-int v_start = 384;  //2048
-int v_end = 256;    //2048
-int fm_decay = 1024;  //2048
+int32_t fm_modulator = 256; // 2048
+int32_t v_start = 384;  //2048
+int32_t v_end = 256;    //2048
+int32_t fm_decay = 1024;  //2048
 
 
 
-uint16_t fm_tableLength = SinusLengthInt; //2048;
-int fm_volume = SinusLengthInt - 1; // +- 2047
+uint32_t fm_tableLength = SinusLengthInt; //2048;
+int32_t fm_volume = SinusLengthInt - 1; // +- 2047
+
+uint32_t divider = pow(2, (TL - 8));
+uint32_t divider2 = pow(2, (precisionShift - 8));
+uint32_t scale = precisionShift - TL ;
+int32_t ScaleV =  pow(2, scale);
+
 uint64_t fm_mask = pow(2, TL+precisionShift) - 1;
-uint16_t divider = pow(2, (TL - 8));
-uint16_t divider2 = pow(2, (precisionShift - 8));
-uint16_t scale = precisionShift - TL ;
-int16_t ScaleV =  pow(2, scale);
 uint64_t range = fm_tableLength << precisionShift;
 
 
@@ -197,17 +196,17 @@ uint64_t range = fm_tableLength << precisionShift;
  * Note: the voice-index is the same as the adsr index! (a slot)
  */
 typedef struct {
-  uint16_t note;
+  uint32_t note;
   uint32_t step;
   uint32_t modulatorStep;
   uint64_t tableIndex;
   uint64_t modTableIndex;
-  int16_t vOutput;
+  int32_t vOutput;
   uint32_t activationTime;
   uint64_t tableIndexEnv3;
-  uint16_t envStep3;
-  int16_t volDiff;
-  int16_t fmVol;
+  uint32_t envStep3;
+  int32_t volDiff;
+  int32_t fmVol;
   
  } Voice_type;
 
@@ -217,7 +216,7 @@ typedef struct {
  */
 Voice_type voice[MAXVOICE]; 
  
-uint16_t waveForm;              // which wavetable to play (saw, sin etc.)
+uint32_t waveForm;              // which wavetable to play (saw, sin etc.)
 uint32_t mTableIndexMax; // here the table overflows
 uint32_t tableLength; // length of this wavetable
 
@@ -287,7 +286,7 @@ void handleNoteOn(byte inChannel, byte inNote, byte inVelocity) {
       
       // now trigger the new voice
     
-      uint16_t f = getFreq(inNote); // determine freq. from midi note
+      uint32_t f = getFreq(inNote); // determine freq. from midi note
       if (waveForm != FM)
           setVoiceFreqency(f, slot, mil); // set the step value for the isr
       else
@@ -439,13 +438,13 @@ void doVoice() {
       
     
       //pwmWrite(PWM_OUT, sum); // res
-      ledcWrite(ledChannel, sum);
+      ledcWrite(PWMCHANNEL, sum);
       
       //digitalWrite(PC13, 0); // turn on, voice is active
     }
     else {
 
-      ledcWrite(ledChannel, pwmVolume2);
+      ledcWrite(PWMCHANNEL, pwmVolume2);
       vres = 512;
     }
 
@@ -514,13 +513,13 @@ void setup() {
   Serial.begin(115200); // serial for pc communication
 
 
-  ledcSetup(ledChannel, pwmRate, resolution); // configure PWM output
-  ledcAttachPin(PWM_OUT, ledChannel);         // attach the channel PWM pin
+  ledcSetup(PWMCHANNEL, PWMRATE, PWMRESOLUTION); // configure PWM output
+  ledcAttachPin(PWM_OUT, PWMCHANNEL);         // attach the channel PWM pin
 
 
   timer = timerBegin(0, 80, true);
   timerAttachInterrupt(timer, handler_Synth, true);
-  timerAlarmWrite(timer, isrms, true);
+  timerAlarmWrite(timer, ISRMS, true);
   timerAlarmEnable(timer);
 
   
@@ -532,16 +531,7 @@ void setup() {
 
 void loop() {
   readMIDI();
-
-
   
   updateDisplay();
    
-
-
-  
-  
-  
-
-  
 }

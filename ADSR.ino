@@ -43,9 +43,7 @@ void initADSR() {
 void setGateOn(int16_t channel) {
   vAdsr[channel].ATableIndex = 0;   // reset table counter 
   vAdsr[MAXVOICE].ATableIndex = 0;  // reset table counter for filter adsr
-  setADSR_mode(ATTACK, channel);    // start attack
-  setADSR_mode(ATTACK, filter);     // just ad mode!
-  
+  setADSR_mode(ATTACK, channel);    // start attack  
 }
 
 /**
@@ -65,7 +63,7 @@ void setGateOff(int16_t channel) {
 uint16_t calculateScale(uint16_t scaleValue, uint16_t time) {
   unsigned long z = (LogLength * LogLength) / scaleValue; 
   z = z << 10; // *1024 to increase precision of table pointer calculation
-  unsigned long n = time * pwmRate;
+  unsigned long n = time * PWMRATE;
   z /= n;
   return (uint16_t) z;
 }

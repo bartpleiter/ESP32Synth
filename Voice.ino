@@ -4,12 +4,6 @@
 
 
 
-/**
- * Method declaration
- */
-void getWaveAmp(uint16_t);
-void selectWave(int16_t);
-
 
 void initVoices() {
   for (int16_t n = 0; n < MAXVOICE; n++) {
@@ -45,7 +39,7 @@ void setVoiceFreqency(uint16_t f, int16_t slot, uint32_t mil) {
   */
   unsigned long z = tableLength  * (unsigned long) f;       // multiply table-length by target frequency
   z = z << 8;                                               // *256 to increase precision of table pointer calculation
-  z = z / pwmRate;
+  z = z / PWMRATE;
   //Serial.print(" z=");
   //Serial.println(z);
   voice[slot].step = (uint16_t) z;
@@ -79,7 +73,7 @@ void setFMFrequencys(uint16_t f, int16_t slot, uint32_t mil) {
    
     uint64_t z = SinusLengthInt  * (uint64_t) f; //Oszil1, multiply table-length by target frequency
     z = z << precisionShift;                    // *4096 to increase precision of table pointer calculation
-    voice[slot].step = z / pwmRate;           // use this to step through the sine-table
+    voice[slot].step = z / PWMRATE;           // use this to step through the sine-table
     //Serial.print(" step=");
     //Serial.println(voice[slot].step);
   
