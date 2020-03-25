@@ -23,7 +23,7 @@ void initDisplay()
 void dispCurve(uint16_t y, uint16_t x) 
 {
   uint16_t h = DISP_HEIGHT - 1;
-  uint16_t ym = map(y, 0, 1023, 0, 47);
+  uint16_t ym = map(y, 0, 256, 0, 47);
   display.drawLine(x, 0, x, DISP_HEIGHT-1, WHITE);
   display.drawLine(x, scopeYprev, x, ym, BLACK);
   
@@ -35,7 +35,7 @@ void dispCurve(uint16_t y, uint16_t x)
 // Should be called in main loop
 void drawScope()
 {
-  dispCurve(vres, scopeX);
+  dispCurve(scopeAmpl, scopeX);
   scopeX++;
   if (scopeX >= DISP_WIDTH) 
   {
@@ -44,7 +44,7 @@ void drawScope()
     if (mil - scopeRefreshCounter >= scopeDelay) 
     { 
       scopeRefreshCounter = mil;
-      requestToUpdate = true;
+      sendFrameBuffer = true;
     }   
   }  
 }
@@ -52,16 +52,16 @@ void drawScope()
 // Set ADSR display values
 // inputs values range from 0 to 4095
 void DisplaySetAtValue(uint16_t val) {
-  dispAttack = map(val, 0, 4095, 0, 36);
+  dispAttack = map(val, 0, 127, 0, 36);
 }
 void DisplaySetDeValue(uint16_t val) {
-  dispDecay = map(val, 0, 4095, 0, 20);
+  dispDecay = map(val, 0, 127, 0, 20);
 }
 void DisplaySetSusValue(uint16_t val) {
   dispSustain = map(val, 0, 4095, 0, 40);;
 }
 void DisplaySetReValue(uint16_t val) {
-  dispRelease = map(val, 0, 4095, 0, 20);
+  dispRelease = map(val, 0, 127, 0, 20);
 }
 
 void drawADSR() {
@@ -80,7 +80,7 @@ void drawADSR() {
     display.drawLine(dispAttack + dispDecay, DISP_ADSR_HEIGHT_OFFSET + (40 - dispSustain) -1, 
                       dispAttack + dispDecay + 20, DISP_ADSR_HEIGHT_OFFSET + (40 - dispSustain) - 1, BLACK);
 
-    // Relea
+    // Release
     display.drawLine(dispAttack + dispDecay + 20, DISP_ADSR_HEIGHT_OFFSET + (40 - dispSustain) -1, 
                       dispAttack + dispDecay + 20 + dispRelease, DISP_HEIGHT-1 , BLACK);
 }
@@ -110,45 +110,45 @@ void drawPWM() {
  */
 void getSawWave() {
   for (int n=0; n < DISP_WIDTH; n++) {
-    uint16_t idx = (n * SawLengthInt) / DISP_WIDTH;
-    waveFormD[n] = (DISP_HEIGHT/2) + (getSawInt(idx) >> 7) - 6;
+    uint16_t idx = (n * WAVETABLELENGTH) / DISP_WIDTH;
+    scopeWaveForm[n] = (DISP_HEIGHT/2) + (getSawInt(idx) >> 7) - 6;
   }
 }
 
 void getSinWave() {
   for (int n=0; n < DISP_WIDTH; n++) {
-    uint16_t idx = (n * SinusLengthInt) / DISP_WIDTH;
-    waveFormD[n] = (DISP_HEIGHT/2) + (getSinInt(idx) >> 7) - 6;
+    uint16_t idx = (n * WAVETABLELENGTH) / DISP_WIDTH;
+    scopeWaveForm[n] = (DISP_HEIGHT/2) + (getSinInt(idx) >> 7) - 6;
   }
 }
 void getTriWave() {
   for (int n=0; n < DISP_WIDTH; n++) {
-    uint16_t idx = (n * TriLengthInt) / DISP_WIDTH;
-    waveFormD[n] = (DISP_HEIGHT/2) + (getTriInt(idx) >> 7) - 6;
+    uint16_t idx = (n * WAVETABLELENGTH) / DISP_WIDTH;
+    scopeWaveForm[n] = (DISP_HEIGHT/2) + (getTriInt(idx) >> 7) - 6;
   }
 }
 /*void getSQRWave() {
   
     for (int n=0; n < WAVEDISP_WIDTH; n++) {
       uint16_t idx = (n * TriLength) / WAVEDISP_WIDTH;
-      waveFormD[n] = (idx < pwm_value)?63:0; 
+      scopeWaveForm[n] = (idx < pwm_value)?63:0; 
     }
   
 }
 */
-void drawWaveForm(int w) {
+void drawWaveForm() {
   display.clearDisplay();
 
   display.setCursor(32, 0);
   display.println("Wave"); 
   
 
-  if (w == SQR) {
+  if (waveForm == SQR) {
     display.drawLine(0,             12,                DISP_WIDTH/2, 12,            BLACK);
     display.drawLine(DISP_WIDTH/2,  12,                DISP_WIDTH/2, DISP_HEIGHT-1, BLACK);
     display.drawLine(DISP_WIDTH/2,  DISP_HEIGHT-1    , DISP_WIDTH,   DISP_HEIGHT-1, BLACK);
   }
-  else if (w == FM) {
+  else if (waveForm == FM) {
     display.setTextSize(2);
     display.setCursor(32, 20);
     display.println("FM"); 
@@ -156,7 +156,7 @@ void drawWaveForm(int w) {
   }
   else {
     for (int n = 0; n < DISP_WIDTH; n++)
-      display.drawPixel(n, DISP_HEIGHT - waveFormD[n], BLACK);
+      display.drawPixel(n, DISP_HEIGHT - scopeWaveForm[n], BLACK);
   }
 }
 
@@ -171,38 +171,6 @@ void drawTBI(char* text) {
   display.println(text); 
 }
 
-void drawFM()
-{
-  display.clearDisplay();
-
-  display.setCursor(36, 0);
-  display.println("FM"); 
-
-  display.setCursor(0, 14);
-  display.println("MOD"); 
-  display.setCursor(60, 14);
-  display.println(fm_modulator); 
-
-
-  display.setCursor(0, 22);
-  display.println("START"); 
-  display.setCursor(60, 22);
-  display.println(v_start); 
-  
-
-  display.setCursor(0, 30);
-  display.println("END"); 
-  display.setCursor(60, 30);
-  display.println(v_end); 
-  
-
-  display.setCursor(0, 38);
-  display.println("DECAY"); 
-  display.setCursor(60, 38);
-  display.println(fm_decay); 
-  
-}
-
 
 /**
    * Update the display
@@ -210,20 +178,20 @@ void drawFM()
   void updateDisplay() {
    switch (page) {
     case PAGE_WAVE:
-      if (requestToUpdate) 
+      if (sendFrameBuffer) 
       {
-        if (sNo == SAW)
+        if (waveForm == SAW)
           getSawWave();
-        else if (sNo == SIN) 
+        else if (waveForm == SIN) 
           getSinWave();
-        else if (sNo == TRI) 
+        else if (waveForm == TRI) 
           getTriWave();
-        drawWaveForm(sNo);
+        drawWaveForm();
       }
       break;
       
     case PAGE_ADSR:
-      if (requestToUpdate) {
+      if (sendFrameBuffer) {
         drawADSR();
       }
       break;
@@ -231,31 +199,29 @@ void drawFM()
 
       
       case PAGE_FM:
-          if (requestToUpdate)
-            drawFM();
+          if (sendFrameBuffer)
+            drawTBI("FM");
           break;  
 
       case PAGE_LFO:
-          if (requestToUpdate)
+          if (sendFrameBuffer)
             drawTBI("LFO");
           break;
 
       case PAGE_REVERB:
-          if (requestToUpdate)
+          if (sendFrameBuffer)
             drawTBI("REVERB");
           break;
           
       case PAGE_PWM:
-          if (requestToUpdate)
+          if (sendFrameBuffer)
             drawPWM();
           break;
           
       case PAGE_PASS:
-          if (requestToUpdate)
+          if (sendFrameBuffer)
             drawTBI("PASS");
           break;
-
-
 
       case PAGE_SCOPE:
         drawScope();
@@ -264,8 +230,8 @@ void drawFM()
   }
 
  
-  if (requestToUpdate) {
-    requestToUpdate = false;
+  if (sendFrameBuffer) {
+    sendFrameBuffer = false;
     display.display();
   }
 }

@@ -1,19 +1,3 @@
-
-
-//midi buffer vars:
-uint8_t mBuffer[3];
-uint8_t mIdx = 0;
-uint8_t cmdLen =1;
-uint8_t command = 0;
-
-
-// to set all notes off (in case I want to map this to a certain control value):
-//  handleAllNoteOff();
-
-/**
- * Execute received Midi command 
- * Control values are usually in the range of 0-127, so we can shift it to the left by 5 for simple scaling to 0-~4095
- */
 void executeMidi() {
     // received 3 bytes
     /*
@@ -29,13 +13,13 @@ void executeMidi() {
     // note on
     if (command >= 0x90 && command <= 0x9f) 
     {
-      handleNoteOn((command & 0x0f) + 1, mBuffer[0], mBuffer[1]); // channel, note, velocity
+      handleNoteOn((command & 0x0f), mBuffer[0], mBuffer[1]); // channel, note, velocity
     }
     
     // note off
     else if (command >= 0x80 && command <= 0x8f) 
     {
-      handleNoteOff((command & 0x0f) + 1, mBuffer[0], 0);
+      handleNoteOff((command & 0x0f), mBuffer[0], 0);
     }
     
     // control change
@@ -46,13 +30,12 @@ void executeMidi() {
 
         if (page == PAGE_WAVE) {
           // select a new waveform!
-          sNo = map(mBuffer[1], 0, 127, 0, WMAX-1);
-          selectWave(sNo);
-          requestToUpdate = true;
+          waveForm = map(mBuffer[1], 0, 127, 0, WMAX-1);
+          sendFrameBuffer = true;
         }
         else if (page == PAGE_PWM) {
           pwmWidth = map(mBuffer[1], 0, 127, 0, 2047);
-          requestToUpdate = true;
+          sendFrameBuffer = true;
         }
         else if (page == PAGE_SCOPE) {
           scopeDelay = map(mBuffer[1], 0, 127, 0, 1000);
@@ -68,14 +51,9 @@ void executeMidi() {
       else if ( mBuffer[0] == 0x4a) {
         if (page == PAGE_ADSR)
         {
-          setAttackScale(mBuffer[1] << 5);
-          DisplaySetAtValue(mBuffer[1] << 5); // currently for graphics functions
-          requestToUpdate = true;
-        }
-        else if (page == PAGE_FM)
-        {
-          fm_modulator = mBuffer[1] << 2;
-          requestToUpdate = true;
+          setAttackScale(mBuffer[1]);
+          DisplaySetAtValue(mBuffer[1]); // currently for graphics functions
+          sendFrameBuffer = true;
         }
       }
 
@@ -83,14 +61,9 @@ void executeMidi() {
       else if ( mBuffer[0] == 0x47) {
         if (page == PAGE_ADSR)
         {
-          setDecayScale(mBuffer[1] << 5);
-          DisplaySetDeValue(mBuffer[1] << 5);
-          requestToUpdate = true;
-        }
-        else if (page == PAGE_FM)
-        {
-          v_start = map(mBuffer[1], 0, 127, 0, 2047);
-          requestToUpdate = true;
+          setDecayScale(mBuffer[1]);
+          DisplaySetDeValue(mBuffer[1]);
+          sendFrameBuffer = true;
         }
       }
 
@@ -98,14 +71,9 @@ void executeMidi() {
       else if ( mBuffer[0] == 0x49) {
         if (page == PAGE_ADSR)
         {
-          setSustainValue(mBuffer[1] << 5);
+          Sval =mBuffer[1] << 5;
           DisplaySetSusValue(mBuffer[1] << 5);
-          requestToUpdate = true;
-        }
-        else if (page == PAGE_FM)
-        {
-          v_end = map(mBuffer[1], 0, 127, 0, 2047);
-          requestToUpdate = true;
+          sendFrameBuffer = true;
         }
       }
 
@@ -113,14 +81,9 @@ void executeMidi() {
       else if ( mBuffer[0] == 0x48) {
         if (page == PAGE_ADSR)
         {
-          setReleaseScale(mBuffer[1] << 5);
-          DisplaySetReValue(mBuffer[1] << 5);
-          requestToUpdate = true;
-        }
-        else if (page == PAGE_FM)
-        {
-          fm_decay = map(mBuffer[1], 0, 127, 0, 2047);
-          requestToUpdate = true;
+          setReleaseScale(mBuffer[1]);
+          DisplaySetReValue(mBuffer[1]);
+          sendFrameBuffer = true;
         }
       }
     }
@@ -135,7 +98,7 @@ void executeMidi() {
         if (page >= PAGES)
           page = 0;
 
-        requestToUpdate = true;
+        sendFrameBuffer = true;
       }
       else if (mBuffer[1] == 0)
       {
@@ -144,7 +107,7 @@ void executeMidi() {
         else
           page--;
 
-        requestToUpdate = true;
+        sendFrameBuffer = true;
       }
    
     }
@@ -152,18 +115,15 @@ void executeMidi() {
 }
 
 
-/**
- * Check if this byte is a command byte
- * @param the byte we just read
- * @return the length of the expected command, if it is a command byte ! Else return 0
- */
 int isCommand(uint8_t b ) {
   int l = 0;
-  if (b >= 0x80 && b <= 0x8f) { // Note off
+  if (b >= 0x80 && b <= 0x8f) { 
+    // Note off
     l = 2; 
     command = b;
   }
-  else if (b >= 0x90 && b <= 0x9f) { // Note on
+  else if (b >= 0x90 && b <= 0x9f) { 
+    // Note on
     l = 2;
     command = b;
   }
@@ -194,34 +154,25 @@ int isCommand(uint8_t b ) {
   }
   else if (b >= 0xf0 && b <= 0xff) {
      // System exclusive
-    l = 1; // this may be wrong, change per manufacturer
+    l = 1;
     command = b;
   }
   return l;
 }
 
 
-/**
- * Read one byte from the serial stream
- */
- //TODO: optimize len and cmdLen
   void doRead() {
     uint8_t b = Serial.read();
-    
-    // display the byte on the display
-    //printHex(b);
 
     int len = isCommand(b );
     if (len > 0){
       cmdLen = len;
-      mIdx = 0; // reset buffer index
+      mIdx = 0;
     }
     else {
-      // is a data-byte 
       mBuffer[mIdx++] = b;
       cmdLen--;
       if (cmdLen == 0) {
-        // all data byte are read, now execute the command
          executeMidi();
       }
     }
