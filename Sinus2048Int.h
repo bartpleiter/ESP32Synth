@@ -1,3 +1,8 @@
+/*
+ * Contains table of sinus wave
+ */
+
+
 const int16_t sinusInt[] = {
 0,6,13,19,25,31,38,44,50,57,63,69,75,82,88,94,
 100,107,113,119,126,132,138,144,151,157,163,169,176,182,188,194,
@@ -129,6 +134,7 @@ const int16_t sinusInt[] = {
 -99,-93,-87,-81,-74,-68,-62,-56,-49,-43,-37,-30,-24,-18,-12,-5
 };
 
-int16_t getSinInt(uint16_t index) {
+int32_t getSinInt(uint32_t index) 
+{
   return sinusInt[index];
 }

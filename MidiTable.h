@@ -1,4 +1,7 @@
-
+/*
+ * Contains MIDI note ID to frequency table
+ */
+ 
 
 const uint32_t midiFreq[153] = {
 //C,    C',   D,    D',   E,     F,     F',    G,     G',    A,     A',    B  
@@ -18,7 +21,8 @@ const uint32_t midiFreq[153] = {
 };
 
 
-int getFreq(uint32_t note) {
+uint32_t getFreq(uint32_t note) 
+{
   return midiFreq[note];
 }
 
@@ -38,7 +42,8 @@ const float PROGMEM midiFreq[132] = {
 8372.0181, 8869.8442, 9397.2726, 9956.0635, 10548.0818, 11175.3034, 11839.8215, 12543.8540, 13289.7503, 14080.0000, 14917.2404, 15804.2656
 };
 
-float getFreq(uint16_t note) {
+float getFreq(uint32_t note) 
+{
   return pgm_read_float( &midiFreq[note] );
 }
 */

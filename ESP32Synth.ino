@@ -1,16 +1,9 @@
 /**
- * STM32duino synth
+ * ESP32Synth
  * 
- * CLEANUP TODO:
- * fix the atan clipping mehtod
- * make unneeded global variables local
- * rename variables and functions
- * improve polyphony checking by looking at note with lowest amplitude
- * use proper data types (int uint32_t int32_t etc.)
- * properly comment code
- * create exponential scale for adsr values (only calculated when knob is rotated, so no lookup tables!!!)
- * create display which shows which notes are active/pressed (polyphony)
- * try to put (at least some) tables in RAM to increase speed
+ * TODO:
+ * create exponential scale for adsr knob values (only calculated when knob is rotated, so no lookup tables needed!)
+ * implement all missing features like FM, LFO, Reverb and Low/Hi pass
  */
 
 
@@ -21,6 +14,7 @@
 #include <SPI.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_PCD8544.h>
+#include <Fonts/Picopixel.h>
 
 // Note ID to frequency table
 #include "MidiTable.h"  
@@ -50,7 +44,7 @@
 #define FM  4     // FM waves
 #define WMAX  5   // number of waves
 
-uint32_t waveForm;                // currently selected waveform
+uint32_t waveForm = SAW;          // currently selected waveform
 uint32_t pwmWidth = 1023;         // width of square wave (0-2047)
 
 
@@ -64,7 +58,7 @@ uint32_t pwmWidth = 1023;         // width of square wave (0-2047)
 #define ISRMS       25            // ms delay between each interrupt, should be synced with SAMPLERATE (40KHz)
 
 uint32_t mil        = 0;          // replaces millis() and is calculated during interrupt
-uint32_t globalTic  = 0;          // ticks at SAMPLERATE, counts the produced samples
+uint32_t globalTic  = 0;          // ticks at SAMPLERATE, used for counting to 1ms
 
 // ESP32 timer for interrupt
 hw_timer_t * timer      = NULL;
@@ -93,30 +87,27 @@ uint32_t Sval       = 4095; // sustain value
 typedef struct {
   uint32_t state;           // current ADSR state
   uint32_t counter;         // counter for calculations within current ADSR state
-  uint32_t output;          // output of ADSR
+  uint32_t output;          // output of ADSR, has range of 0-4095
   uint32_t lastOutput;      // previous output value (for release value calculation)
 } ADSR;
 
 
 // ------------ VOICE --------------
-#define MAXVOICES   12      // how many voices are allowed to be active at the same time
+#define MAXVOICES   20      // how many voices are allowed to be active at the same time
 
 // Voice data structure
 typedef struct {
   ADSR      adsr;           // ADSR values (each voice has its own set of ADSR values)
-  uint32_t  wave;           // selected wave (currently equal to the globally selected wave
+  uint32_t  wave;           // selected wave (currently unused. only global waveForm variable is used)
   uint32_t  note;           // note ID of voice
   uint32_t  velocity;       // velocity of current note (currently unused, should be relatively easy to implement)
   uint32_t  indexStep;      // by how much we increase the wave table index for each sample (changes with frequency)
   uint32_t  tableIndex;     // current index of wave table
-  int32_t   output;         // integer output of voice
+  int32_t   output;         // integer output of voice, has range of +-2047
   uint32_t  activationTime; // millis when the voice was activated
 } Voice;
 
 Voice voices[MAXVOICES];    // all voices in one array
-
-uint32_t activeVoices = 0;  // number of voices that are not idle
-
 
 //------------- GRAPHICS ---------------
 //clk, din, dc, cs, rst
@@ -128,7 +119,7 @@ Adafruit_PCD8544 display(0, 4, 2, 15, 13); // using software SPI
 bool sendFrameBuffer;                 // true if we want to send the framebuffer to the display
 
 // menu pages
-#define PAGES       8
+#define PAGES       9
 #define PAGE_WAVE   0
 #define PAGE_ADSR   1
 #define PAGE_FM     2
@@ -136,7 +127,8 @@ bool sendFrameBuffer;                 // true if we want to send the framebuffer
 #define PAGE_REVERB 4
 #define PAGE_PWM    5
 #define PAGE_PASS   6
-#define PAGE_SCOPE  7
+#define PAGE_VOICES 7
+#define PAGE_SCOPE  8
 
 uint32_t  page = PAGE_WAVE;           // the current menu page
 
@@ -149,6 +141,8 @@ uint32_t scopeAmpl            = 0;    // amplitude of audio for scope
 
 int32_t scopeWaveForm[DISP_WIDTH];    // waveform data for display
 
+uint32_t milPrev              = 0;    // millis of last sent framebuffer (for VOICES page)
+
 #define DISP_ADSR_HEIGHT_OFFSET 8     // height offset for ADSR graph, to account for menu name
 
 // ADSR values for display
@@ -159,30 +153,29 @@ uint32_t dispRelease;
 
 
 //------------- MIDI ---------------
+#define MIDICONTROLMAXVAL 127 // maximum value of a MIDI control byte
 
 uint8_t mBuffer[3]  = {0,0,0};  // MIDI argument buffer of three bytes
 uint8_t mIdx        = 0;        // current index of MIDI buffer
 uint8_t cmdLen      = 2;        // number of arguments of current midi command
 uint8_t command     = 0;        // midi command type
 
-#define MIDICONTROLMAXVAL 127 // maximum value of a MIDI control byte
-
 
 /*
  * FUNCTIONS
  */
 
-// What to do when a note is pressed.
-// Looks for an idle voice slot to assign it to.
+// What to do when a note is pressed
+// Looks for an idle voice slot to assign it to
 // If it cannot find an idle slot, it will look for a voice slot with the same note ID 
 // If it cannot find slot with the same note ID, it will look for the slot with the lowest amplitude in release state
 // If a slot is still not found, it will select the oldest slot
 //
 // Args:
-//  - inChannel:  MIDI channel of pressed note
-//  - inNote:     note ID of pressed note
-//  - inVelocity  velocity of pressed note
-void handleNoteOn(uint8_t inChannel, uint8_t inNote, uint8_t inVelocity) 
+//  - channel:  MIDI channel of pressed note
+//  - noteID:   note ID of pressed note
+//  - velocity: velocity of pressed note
+void handleNoteOn(uint8_t channel, uint8_t noteID, uint8_t velocity) 
 {
   int32_t slot = -1;  // a slot of -1 means that no slot has been selected
   
@@ -201,7 +194,7 @@ void handleNoteOn(uint8_t inChannel, uint8_t inNote, uint8_t inVelocity)
   {
     for (uint32_t n=0; n < MAXVOICES; n++) 
     {
-      if(voices[n].note == inNote)
+      if(voices[n].note == noteID)
       {
         slot = n;
         break;
@@ -231,7 +224,8 @@ void handleNoteOn(uint8_t inChannel, uint8_t inNote, uint8_t inVelocity)
   // if still no slot was found, select the oldest slot
   if (slot == -1) 
   {
-    uint32_t lowestTime = 0xFFFFFFFF; // initialize to max uint32_t value
+    slot = 0;                                   // to make sure slot will always be a valid value
+    uint32_t lowestTime = 0xFFFFFFFF;           // initialize to max uint32_t value
     for (uint32_t n=0; n < MAXVOICES; n++) 
     {
       if (voices[n].activationTime < lowestTime)
@@ -242,19 +236,29 @@ void handleNoteOn(uint8_t inChannel, uint8_t inNote, uint8_t inVelocity)
     }
   }
 
-  voices[slot].note = inNote;         // set the note ID
+  // when we arrive here, we have found a slot
+  voices[slot].note = noteID;         // set the note ID
   voices[slot].activationTime = mil;  // set the activation time
-  uint32_t f = getFreq(inNote);       // get freqency of note ID
+  uint32_t f = getFreq(noteID);       // get freqency of note ID
   setVoiceFreqency(f, slot);          // set the freqency
   setGateOn(slot);                    // notify the ADSR that the note was pressed
 }
 
 
-void handleNoteOff(uint8_t inChannel, uint8_t inNote, uint8_t inVelocity) 
+// What to do when a note is released
+// Looks for all voices with the same note ID as the released note ID
+// Also checks if the voice is not idle and already in release state, since we want to ignore those
+// Then tells the ADSR to release those voices
+//
+// Args:
+//  - channel:  MIDI channel of released note
+//  - noteID:   note ID of released note
+//  - velocity: velocity of released note
+void handleNoteOff(uint8_t channel, uint8_t noteID, uint8_t velocity) 
 {
   for (int n=0; n < MAXVOICES; n++) 
   {
-    if(voices[n].note == inNote)
+    if(voices[n].note == noteID && voices[n].adsr.state != ADSR_IDLE && voices[n].adsr.state != ADSR_RELEASE)
     {
       setGateOff(n);
     }
@@ -262,141 +266,99 @@ void handleNoteOff(uint8_t inChannel, uint8_t inNote, uint8_t inVelocity)
 }
 
 
-
-// -------------------
-
-
-
-
- /**
- * Here we create the actual sound
- * This method is called 40.000 time per second in the interrupt routine!
- */
-void doVoice() {
-    // Increment envelopes and oszillators
-    for (uint16_t n = 0; n < MAXVOICES; n++) {
-        if ( voices[n].adsr.state != ADSR_IDLE) {
-
-         
-           addStep(n);                 // Audio value, all voices+
-           
-          addADSRStep(n);  
-        }
+// Returns the current audio sample by doing the following steps:
+//  - update the states of the active voices and ADSRs
+//  - apply ADSR to the outputs of all active voices
+//  - mix those outputs together
+//  - scale output to range of DAC
+//  - apply clipping where needed
+//  - convert signed sample to unsigned sample
+//  - return unsigned sample
+uint32_t produceSample() 
+{
+  // update the states of the active voices and ADSRs
+  for (uint32_t n = 0; n < MAXVOICES; n++) 
+  {
+    if ( voices[n].adsr.state != ADSR_IDLE) 
+    {
+      updateVoice(n);
+      updateADSR(n);  
     }
+  }
 
-      
-    //-------------- Audio Mixer -----------------
-    int32_t sum = 0;      
-    activeVoices = 0;
-    for (int16_t n = 0; n < MAXVOICES; n++) {
-     if (voices[n].adsr.state != ADSR_IDLE) {
-         int32_t v = voices[n].output;   // +-2047 as amplitude
-         int32_t env = voices[n].adsr.output; // envelope amplitude, 0-4095
-         // --- Envelope VCA: ----
-         int32_t act = (env * v) >> 12; //+-2047
-         sum = sum + act;         
-        
-         activeVoices++;   
-      } 
-    }
+  // apply ADSR to the outputs of all active voices and add them together
+  int32_t sum = 0;  
+  for (uint32_t n = 0; n < MAXVOICES; n++) 
+  {
+    if (voices[n].adsr.state != ADSR_IDLE) 
+    {
+      // voice output is in range of +-2047
+      // ADSR output is in range of 0-4095
+      // multiply both outputs and divide by 4096 to get an output of +-2047
+      int32_t signedADSR = voices[n].adsr.output;   // convert uint32_t to int_32t
+      int32_t ADSRappliedOutput = (signedADSR * voices[n].output) >> 12;
+      sum = sum + ADSRappliedOutput;             
+    } 
+  }
        
-
-    
-    //----------------- Synth Audio Mixer  --------------------
-    if (activeVoices > 0)
-    {
-      sum = sum >> 7; // divide by 8 to allow for 8 peaks at the same time, then divide by 16 to reduce amplitude from +-2047 to +-128.
-
-      // do hard clipping
-      // TODO implement soft clipping
-      if (sum > 127)
-        sum = 127;
-      if (sum < -128)
-        sum = -128;
-      
-          
-      // until here, all signals are +- values, so now add half amplitude to get positive values only:
-      sum = 128 + sum;
-      scopeAmpl = sum;
-      
-    
-      //ledcWrite(PWMCHANNEL, sum);
-      dacWrite(DAC_OUT, sum);
-      
-    }
-    else {
-
-      dacWrite(DAC_OUT, 128);
-      scopeAmpl = 128;
-    }
-
+  // scale output to range of DAC
+  sum = sum >> 7; // divide by 8 to allow for 8 peaks at the same time, then divide by 16 to reduce amplitude from +-2047 to +-128.
   
-  }
+  // apply hard clipping if needed
+  if (sum > 127)
+    sum = 127;
+  if (sum < -128)
+    sum = -128;
 
+  // convert signed sample to unsigned sample
+  uint32_t unsignedSample = 128 + sum;  // add 128 since the DAC has a range of 0-255
 
-  /**
- * Interrupt routine, triggered at 40Khz 
- * In this routine, we travel along the wavetable and output the amplitude values we find.
- */
- void handler_Synth() {
-  portENTER_CRITICAL_ISR(&timerMux);
-
-  globalTic++;            // count up all the time at 40khz
-  if (globalTic >= 40) {
-    globalTic = 0;        // 40 tics at 40 khz is one millisec.
-    mil++;                // increase millisecond tic
-    if (mil % 1000 == 0)
-    {
-      Serial.println(".");
-    }
-  }
-  doVoice();              // the actual sound generation
-
-
+  scopeAmpl = unsignedSample;           // make a copy of the sample for the scope display
   
-  
-  portEXIT_CRITICAL_ISR(&timerMux);
- }
-
-  
-
-
-
-
-
-
-
-void setup() {
-  initVoices();
-  initDisplay();
-
-  DisplaySetAtValue(8);
-  DisplaySetDeValue(10);
-  DisplaySetSusValue(4095);
-  DisplaySetReValue(13);
-  
-  sendFrameBuffer = true; // inital draw of the display
-
-
-  delay(200);
-  Serial.begin(115200); // serial for pc communication
-
-
-  timer = timerBegin(0, 80, true);
-  timerAttachInterrupt(timer, handler_Synth, true);
-  timerAlarmWrite(timer, ISRMS, true);
-  timerAlarmEnable(timer);
-
-  
-  delay(200);
-
+  return unsignedSample;
 }
 
 
-
-void loop() {
-  readMIDI();
+// Interrupt routine of synthesizer (40KHz)
+// Increments counters
+// Produces and outputs a sample
+void synthInterrupt() {
+  portENTER_CRITICAL_ISR(&timerMux);
   
-  updateDisplay();
-   
+  globalTic++;          // counter at 40KHz
+  if (globalTic >= 40)  // 40 tics at 40KHz is 1ms
+  {
+    globalTic = 0;      // reset counter
+    mil++;              // increase millis counter
+  }
+  
+  // generate and output a sample
+  dacWrite(DAC_OUT, produceSample());
+  
+  portEXIT_CRITICAL_ISR(&timerMux);
+}
+
+
+// Things to do at bootup
+void setup() 
+{
+  Serial.begin(115200); // setup serial for MIDI and PC communication
+  
+  initVoices();
+  initADSR();
+  initDisplay();
+
+  // setup timer for interrupt
+  timer = timerBegin(0, 80, true);
+  timerAttachInterrupt(timer, synthInterrupt, true);
+  timerAlarmWrite(timer, ISRMS, true);
+  timerAlarmEnable(timer);
+}
+
+
+// Things to do when not generating sounds
+void loop() 
+{
+  checkMIDI();        // check for MIDI commands
+  updateDisplay();    // update the display
 }
